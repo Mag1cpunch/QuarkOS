@@ -1,0 +1,37 @@
+FROM debian:bookworm
+
+# Install dependencies
+RUN apt update && apt install -y \
+    build-essential \
+    xorriso \
+    grub-pc-bin \
+    mtools \
+    curl \
+    git \
+    gcc \
+    g++ \
+    make \
+    binutils \
+    qemu-system-x86 \
+    nasm \
+    python3 \
+    ca-certificates \
+    wget \
+    pkg-config \
+    unzip \
+    sudo
+
+# Build and install cross-compiler (x86_64-elf)
+RUN apt install -y gcc-12 crossbuild-essential-amd64
+RUN apt install -y gcc-riscv64-unknown-elf gcc-arm-none-eabi
+
+# Or alternatively build your own:
+RUN apt install -y gcc binutils xz-utils libgmp-dev libmpfr-dev libmpc-dev libisl-dev flex bison texinfo
+
+# Clean up cache
+RUN apt clean && rm -rf /var/lib/apt/lists/*
+
+# Set working directory inside container
+WORKDIR /src
+
+CMD ["bash"]
