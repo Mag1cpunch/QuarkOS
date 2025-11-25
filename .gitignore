@@ -1,6 +1,12 @@
 /kernel-deps
 /limine
 /ovmf
+/kernel/bin
+/modules/bin
+/user/bin
+/kernel/obj
+/modules/obj
+/user/obj
 /.github
 /.vscode
 *.iso
