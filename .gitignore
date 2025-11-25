@@ -1,5 +1,7 @@
 /kernel-deps
 /limine
 /ovmf
+/.github
+/.vscode
 *.iso
 *.hdd
