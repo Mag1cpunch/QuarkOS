@@ -1,6 +1,10 @@
 # QuarkOS
 An hobby OS experiment on trying to combine Windows's PE applications with Linux's ELF applications, it features a hybrid kernel(Half monolithic, Half modular)
 
+# Prerequisites
+1. QEMU X86 (Optional: If you want to launch it in QEMU)
+2. Docker
+
 # Building
 1. Clone the project to an directory.
 2. Optional: download my build tool QuarkStrap (currently only automates generating limine config and adding module paths to it).
