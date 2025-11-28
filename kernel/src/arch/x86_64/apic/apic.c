@@ -224,7 +224,7 @@ void unmask_all_lapic_interrupts(void)
 
 // APIC TIMER
 
-static volatile uint64_t apic_timer_ticks = 0;
+volatile uint64_t apic_timer_ticks = 0;
 
 extern Thread* current_thread;
 
@@ -483,6 +483,18 @@ void apic_timer_sleep_ms(uint32_t ms) {
     }
     
     //printf("[APIC_SLEEP] Done after %u iterations\n", iterations);
+}
+
+void apic_timer_sleep_microseconds(uint32_t us) {
+    if (us == 0) return;
+    uint32_t ms = us / 1000;
+    uint32_t rem_us = us % 1000;
+    if (ms > 0) {
+        apic_timer_sleep_ms(ms);
+    }
+    if (rem_us > 0) {
+        tsc_sleep(rem_us);
+    }
 }
 
 void apic_timer_simple_test(void)

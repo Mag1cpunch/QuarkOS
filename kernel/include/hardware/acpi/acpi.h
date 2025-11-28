@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <hardware/acpi/uacpi/types.h>
+
+#include <system/multitasking/spinlock.h>
+
 typedef struct  
 {
     char signature[8];
@@ -11,47 +15,67 @@ typedef struct
     char OEM_id[6];
     uint8_t revision;
     uint32_t rsdt_address;
-} __attribute__ ((packed)) RSDPDescriptor;
+} __attribute__ ((packed)) RSDP_t;
 
-typedef struct RSDPDescriptor20
+typedef struct
 {
-    RSDPDescriptor descriptor10;
+    char signature[8];
+    uint8_t checksum;
+    char OEMID[6];
+    uint8_t revision;
+    uint32_t rsdt_address;
+
+    // 2.0+ fields
     uint32_t length;
     uint64_t xsdt_address;
     uint8_t extended_checksum;
     uint8_t reserved[3];
-} __attribute__ ((packed)) RSDPDescriptor20;
+} __attribute__ ((packed)) XSDP_t;
 
-typedef struct ACPISDTHeader
-{
-    char signature[4];
-    uint32_t length;
-    uint8_t revision;
-    uint8_t checksum;
-    char OEM_id[6];
-    char OEM_table_id[8];
-    uint32_t OEM_revision;
-    uint32_t creator_id;
-    uint32_t creator_revision;
+
+typedef struct ACPISDTHeader {
+  char Signature[4];
+  uint32_t Length;
+  uint8_t Revision;
+  uint8_t Checksum;
+  char OEMID[6];
+  char OEMTableID[8];
+  uint32_t OEMRevision;
+  uint32_t CreatorID;
+  uint32_t CreatorRevision;
 } __attribute__ ((packed)) ACPISDTHeader;
 
-// uint64_t other_SDT[(h.Length - sizeof(h)) / 8];
-typedef struct RSDT
-{
-    ACPISDTHeader h;
-    uint32_t other_SDT[];
+typedef struct RSDT {
+  ACPISDTHeader h;
+  uint32_t PointerToOtherSDT[];
 } __attribute__ ((packed)) RSDT;
 
-typedef struct XSDT
-{
-    ACPISDTHeader h;
-    uint64_t other_SDT[];
+typedef struct XSDT {
+  ACPISDTHeader h;
+  uint64_t PointerToOtherSDT[];
 } __attribute__ ((packed)) XSDT;
 
-XSDT* getXSDT();
-RSDT* getRSDT();
-uint8_t validateRSDPChecksum();
-uint8_t validateSDTChecksum(ACPISDTHeader* table_header);
-ACPISDTHeader* findHeader(char* signature);
+typedef struct GenericAddressStructure
+{
+  uint8_t AddressSpace;
+  uint8_t BitWidth;
+  uint8_t BitOffset;
+  uint8_t AccessSize;
+  uint64_t Address;
+} __attribute__ ((packed)) GenericAddressStructure;
+
+typedef struct {
+    volatile int signaled;
+    spinlock_t lock;
+} uacpi_event_t;
+
+typedef struct {
+    uacpi_io_addr base;
+    uacpi_size len;
+} uacpi_io_map_t;
+
+void acpi_init();
+void acpi_reboot();
+void acpi_shutdown();
 
 #endif

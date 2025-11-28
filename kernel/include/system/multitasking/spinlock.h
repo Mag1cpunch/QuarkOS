@@ -1,7 +1,17 @@
-#ifndef MUTEX_H
-#define MUTEX_H
+#ifndef SPINLOCK_H
+#define SPINLOCK_H
 
-void acquireLock();
-void releaseLock();
+#include <stdint.h>
 
-#endif // MUTEX_H
+typedef struct {
+	volatile int locked;
+} spinlock_t;
+
+static inline void spinlock_init(spinlock_t *lock) {
+	lock->locked = 0;
+}
+
+void spinlock_acquire(spinlock_t *lock);
+void spinlock_release(spinlock_t *lock);
+
+#endif // SPINLOCK_H

@@ -105,4 +105,29 @@ static void reboot() {
     hcf();
 }
 
+static inline bool is_running_under_qemu(char *vendor_out) {
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile (
+        "cpuid"
+        : "=a"(eax), "=c"(ecx)
+        : "a"(1)
+        : "ebx", "edx"
+    );
+    if (!(ecx & (1u << 31)))
+        return false;
+
+    __asm__ volatile (
+        "cpuid"
+        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+        : "a"(0x40000000)
+    );
+    if (vendor_out) {
+        ((uint32_t*)vendor_out)[0] = ebx;
+        ((uint32_t*)vendor_out)[1] = ecx;
+        ((uint32_t*)vendor_out)[2] = edx;
+        vendor_out[12] = 0;
+    }
+    return true;
+}
+
 #endif

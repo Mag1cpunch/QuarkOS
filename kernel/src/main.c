@@ -18,6 +18,7 @@
 #include <hardware/devices/io.h>
 #include <hardware/memory/gdt.h>
 #include <hardware/memory/tss.h>
+#include <hardware/acpi/acpi.h>
 
 #include <system/term.h>
 #include <system/exec/user.h>
@@ -73,11 +74,18 @@ void kmain(void) {
     enableAPICTimer(1000);
     printf("[ OK ] Timer active.\n");
 
+    printf("[ KERNEL ] Initializing ACPI...\n");
+    acpi_init();
+    printf("[ OK ] Done.\n");
+
     printf("[ KERNEL ] Initializing Syscalls...\n");
     syscall_init();
     printf("[ OK ] Done.\n");
 
-    printf("[ INFO ] Hello, World from QuarkOS kernel!\n");
+    printf("[ INFO ] Hello, World from QuarkOS kernel! Shutting down in 5 seconds...\n");
+    apic_timer_sleep_ms(5000);
+    //acpi_reboot();
+    //acpi_shutdown();
 
     printf("[ KERNEL ] Initializing Userspace GDT...\n");
     tss_init();
