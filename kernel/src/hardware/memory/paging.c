@@ -162,6 +162,15 @@ void mapPage(void* virtual_address, void* physical_address, uint64_t flags)
     flushTLB(virtual_address);
 }
 
+void map_region(void *virt, void *phys, size_t size, uint64_t flags) {
+    uintptr_t v = (uintptr_t)virt;
+    uintptr_t p = (uintptr_t)phys;
+    size_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    for (size_t i = 0; i < pages; ++i) {
+        mapPage((void *)(v + i * PAGE_SIZE), (void *)(p + i * PAGE_SIZE), flags);
+    }
+}
+
 uint64_t create_user_address_space(void) {
     uint64_t new_phys = alloc_page();
     PageTable *new_pml4 = (PageTable *)virt_addr(new_phys);
@@ -186,9 +195,14 @@ void unmapPage(void *virtual_address) {
     uint64_t pd_i    = (virt >> 21) & 0x1FF;
     uint64_t pt_i    = (virt >> 12) & 0x1FF;
 
+    // Presence checks for each level
+    if (!pml4->entries[pml4_i].present) return;
     PageTable *pdpt = (PageTable *)virt_addr((uintptr_t)pml4->entries[pml4_i].physical_address << 12);
+    if (!pdpt->entries[pdpt_i].present) return;
     PageTable *pd   = (PageTable *)virt_addr((uintptr_t)pdpt->entries[pdpt_i].physical_address << 12);
+    if (!pd->entries[pd_i].present) return;
     PageTable *pt   = (PageTable *)virt_addr((uintptr_t)pd->entries[pd_i].physical_address << 12);
+    if (!pt->entries[pt_i].present) return;
 
     pt->entries[pt_i].present = 0;
     flushTLB(virtual_address);

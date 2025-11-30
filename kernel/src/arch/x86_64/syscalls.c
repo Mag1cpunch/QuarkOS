@@ -134,10 +134,8 @@ void syscall_init(void) {
     syscall_handlers[60] = (void*)sys_exit;
     syscall_handlers[88] = (void*)sys_reboot;
     uint64_t efer = rdmsr(IA32_EFER_MSR);
-    printf("[ SYSCALLS ] EFER before: %#llx\n", efer);
     efer |= (1 << 0);  // SCE = bit 0
     wrmsr(IA32_EFER_MSR, efer);
-    printf("[ SYSCALLS ] EFER after: %#llx\n", rdmsr(IA32_EFER_MSR));
     wrmsr(IA32_LSTAR_MSR, (uint64_t)syscall_entry_fast);
     wrmsr(IA32_FMASK_MSR, 0x202);
     uint64_t star = 0;

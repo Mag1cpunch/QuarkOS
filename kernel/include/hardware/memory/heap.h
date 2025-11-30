@@ -1,7 +1,7 @@
 #ifndef HEAP_H
 #define HEAP_H
 
-#define HEAP_MAX 0xFFFF900000000000ULL
+#define HEAP_MAX 0xFFFFFFFFFFFFFFFFULL
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,7 +16,7 @@ typedef struct header {
 
 void heap_init();
 void *kmalloc(size_t sz);
-void  kfree(void *ptr);
+void kfree(void *ptr);
 void *krealloc(void *old, size_t newsz);
 
 #endif

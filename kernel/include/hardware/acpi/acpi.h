@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include <hardware/acpi/uacpi/types.h>
+#include <hardware/memory/paging.h>
 
 #include <system/multitasking/spinlock.h>
 
@@ -64,18 +64,23 @@ typedef struct GenericAddressStructure
   uint64_t Address;
 } __attribute__ ((packed)) GenericAddressStructure;
 
-typedef struct {
-    volatile int signaled;
-    spinlock_t lock;
-} uacpi_event_t;
-
-typedef struct {
-    uacpi_io_addr base;
-    uacpi_size len;
-} uacpi_io_map_t;
-
 void acpi_init();
 void acpi_reboot();
 void acpi_shutdown();
+
+#include <hardware/memory/paging.h>
+#include <stdint.h>
+#include <stddef.h>
+
+static inline void ensure_mapped_phys_range(uintptr_t phys, size_t size)
+{
+  uintptr_t start = (phys & ~(PAGE_SIZE - 1)) - 3 * PAGE_SIZE; // map three pages before
+  uintptr_t end   = (phys + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+  extern uint64_t hhdm;
+  for (uintptr_t p = start; p < end; p += PAGE_SIZE) {
+    void *v = (void *)virt_addr(p);
+    mapPage(v, (void *)p, PG_WRITABLE | PG_NX);
+  }
+}
 
 #endif

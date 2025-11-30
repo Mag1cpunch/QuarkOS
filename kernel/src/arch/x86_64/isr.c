@@ -6,6 +6,9 @@
 #include <arch/x86_64/cpu.h>
 #include <arch/x86_64/pic.h>
 #include <arch/x86_64/apic/apic.h>
+#include <arch/x86_64/pic.h>
+
+#include <hardware/memory/paging.h>
 
 #include <system/flanterm.h>
 #include <system/flanterm_backends/fb.h>
@@ -145,26 +148,28 @@ void exceptionHandler(InterruptFrame* frame) {
     printf("Error Code: %#zx\n", frame->err_code);
     showRegisters(frame);
 
-    if ((frame->cs & 0x3) == 3 && current_thread && current_thread->process->pid != 0 && (current_thread->state == THREAD_STATE_RUNNING || current_thread->state == THREAD_STATE_BLOCKED)) {
-        current_thread->state = THREAD_STATE_DONE;
-        printf("Terminating current task due to exception.\n");
+    if (current_thread) {
+        if ((frame->cs & 0x3) == 3 && current_thread && current_thread->process->pid != 0 && (current_thread->state == THREAD_STATE_RUNNING || current_thread->state == THREAD_STATE_BLOCKED)) {
+            current_thread->state = THREAD_STATE_DONE;
+            printf("Terminating current task due to exception.\n");
 
-        Thread *old = current_thread;
-        Thread *next = schedule();
+            Thread *old = current_thread;
+            Thread *next = schedule();
 
-        if (!next || next == old || next->state == THREAD_STATE_DONE) {
-            printf("No runnable task after exception, halting.\n");
-            hcf();
+            if (!next || next == old || next->state == THREAD_STATE_DONE) {
+                printf("No runnable task after exception, halting.\n");
+                hcf();
+            }
+
+            if (old->state == THREAD_STATE_RUNNING)
+                old->state = THREAD_STATE_READY;
+
+            next->state = THREAD_STATE_RUNNING;
+            current_thread = next;
+
+            context_switch(&old->context, &next->context);
+            __builtin_unreachable();
         }
-
-        if (old->state == THREAD_STATE_RUNNING)
-            old->state = THREAD_STATE_READY;
-
-        next->state = THREAD_STATE_RUNNING;
-        current_thread = next;
-
-        context_switch(&old->context, &next->context);
-        __builtin_unreachable();
     }
 
     hcf();
@@ -175,16 +180,26 @@ void registerInterruptHandler(uint8_t interrupt, void (*handler) (InterruptFrame
     interrupt_handlers[interrupt] = handler;
 }
 
+extern uint8_t apic_init_done;
+
+void eoi_isr(uint8_t vector) {
+    if (apic_init_done) {
+        send_eoi_isr(vector, 1, 0);
+    } else {
+        sendEOIPIC(vector);
+    }
+}
+
 void irqHandler(InterruptFrame* frame) {
     uint8_t vec = frame->int_no;
 
-    if (vec != 0xFE && vec != 0x40) {
-        printf("[IRQ] Received IRQ vector: %u (CS=%#lx, RIP=%#lx)\\n", 
-               vec, frame->cs, frame->rip);
-    }
+    //if (vec != 0xFE && vec != 0x40) {
+    //    printf("[IRQ] Received IRQ vector: %u (CS=%#lx, RIP=%#lx)\\n", 
+    //           vec, frame->cs, frame->rip);
+    //}
 
-    if (interrupt_handlers[vec]) {
+    if (interrupt_handlers[vec] != NULL && is_mapped((void*)interrupt_handlers[vec])) {
         interrupt_handlers[vec](frame);
     }
-    send_eoi_isr(vec, 1, 0);
+    eoi_isr(vec);
 }

@@ -54,6 +54,7 @@ void* getPhysicalAddress(void* virtual_address);
 PageTable* initPML4(void); 
 void mapPage(void* virtual_address, void* physical_address, uint64_t flags);
 void mapPage_in_pml4(uint64_t pml4_phys, void *virt, void *phys, uint64_t flags);
+void map_region(void *virt, void *phys, size_t size, uint64_t flags);
 uint64_t readCR3(void);
 uintptr_t page_base(void *p);
 void unmapPage(void *virtual_address);

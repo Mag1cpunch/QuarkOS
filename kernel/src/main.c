@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <colors.h>
 #include <limine.h>
 #include <kernel.h>
 
@@ -19,6 +20,9 @@
 #include <hardware/memory/gdt.h>
 #include <hardware/memory/tss.h>
 #include <hardware/acpi/acpi.h>
+#include <hardware/devices/pci.h>
+
+#include <drivers/video/dfb.h>
 
 #include <system/term.h>
 #include <system/exec/user.h>
@@ -78,14 +82,34 @@ void kmain(void) {
     acpi_init();
     printf("[ OK ] Done.\n");
 
+    //printf("[ KERNEL ] Initializing PCI...\n");
+    //pci_init();
+    //printf("[ OK ] Done.\n");
+
     printf("[ KERNEL ] Initializing Syscalls...\n");
     syscall_init();
     printf("[ OK ] Done.\n");
 
-    printf("[ INFO ] Hello, World from QuarkOS kernel! Shutting down in 5 seconds...\n");
-    apic_timer_sleep_ms(5000);
+    printf("[ INFO ] Hello, World from QuarkOS kernel!\n");
+    //apic_timer_sleep_ms(5000);
     //acpi_reboot();
     //acpi_shutdown();
+
+    printf("[ KERNEL ] Initializing Framebuffer...\n");
+    struct limine_framebuffer_response* fb = get_framebuffer();
+    if (!fb) {
+        printf("[ KERNEL ERROR ] No framebuffer found!\n");
+        for (;;) { __asm__("cli; hlt"); }
+    }
+    dfb_init(fb->framebuffers[0]->width, fb->framebuffers[0]->height, fb->framebuffers[0]->pitch, (void*)fb->framebuffers[0]->address);
+    printf("[ OK ] Done.\n");
+
+    dfb_fillscreen(COLOR_BLACK);
+    //dfb_swapbuffers();
+
+    //for (;;) {
+    //    asm volatile ("hlt");
+    //}
 
     printf("[ KERNEL ] Initializing Userspace GDT...\n");
     tss_init();

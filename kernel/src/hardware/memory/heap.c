@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <hardware/memory/heap.h>
@@ -11,21 +12,23 @@
 
 extern uint8_t _kernel_end[];
 
-static uintptr_t heap_base;
-static uintptr_t heap_top;
-static uintptr_t heap_end;
+static uint64_t heap_base;
+static uint64_t heap_top;
+static uint64_t heap_end;
 
 static hdr_t *free_list = NULL;
 
 void heap_init()
 {
-    heap_base = ((uintptr_t)_kernel_end + PAGE_SIZE-1) & ~(PAGE_SIZE-1);
+    heap_base = ((uint64_t)_kernel_end + PAGE_SIZE-1) & ~(uint64_t)(PAGE_SIZE-1);
     heap_top  = heap_end = heap_base;
 
     printf("\n-----------------------------------------------\n");
     printf("[ Heap Info ]\n");
+    printf("[ Kernel end: %p ]\n", _kernel_end);
     printf("[ Heap base: %#zx ]\n[ Heap top: %#zx ]\n", heap_base, heap_top);
     printf("[ Heap end address: %#zx ]\n", heap_end);
+    printf("[ Heap max: %#llx ]\n", (unsigned long long)HEAP_MAX);
     printf("-----------------------------------------------\n\n");
 
     uintptr_t phys = alloc_page();
@@ -43,18 +46,36 @@ void *kmalloc(size_t size)
     size = (size + 7) & ~7ULL;
     size_t total = size + HDR_SIZE;
 
-    while (heap_top + total > heap_end) {
-        if (heap_end + PAGE_SIZE > HEAP_MAX) return NULL;
+    uint64_t required_end = heap_top + total;
+    while (heap_end < required_end) {
+        //printf("[ KMALLOC LOOP ] heap_end=%#zx required_end=%#zx (diff=%#zx)\n", heap_end, required_end, required_end - heap_end);
+        uint64_t next_heap_end = (uint64_t)heap_end + (uint64_t)PAGE_SIZE;
+        //printf("[ KMALLOC CHECK ] heap_end=%#llx + PAGE_SIZE=%#llx = next_heap_end=%#llx, HEAP_MAX=%#llx\n",
+        //    (unsigned long long)heap_end, (unsigned long long)PAGE_SIZE, (unsigned long long)next_heap_end, (unsigned long long)heap_max64);
+        int signed_cmp = ((int64_t)next_heap_end > (int64_t)HEAP_MAX);
+        int unsigned_cmp = ((uint64_t)next_heap_end > (uint64_t)HEAP_MAX);
+        if (unsigned_cmp) {
+            printf("[ KMALLOC ] Heap limit reached! Max: %#llx, Next end: %#llx, Current end: %#llx\n", (unsigned long long)HEAP_MAX, (unsigned long long)next_heap_end, (unsigned long long)heap_end);
+            return NULL;
+        }
         uintptr_t phys = alloc_page();
-        if (!phys) return NULL;
+        //printf("[ KMALLOC ] alloc_page() -> phys=%#zx for heap_end=%#zx\n", phys, heap_end);
+        if (!phys) {
+            //printf("[ KMALLOC ] alloc_page returned 0 (PMM out of memory) while allocating %zu bytes (heap_top=%#zx, heap_end=%#zx)\n", size, heap_top, heap_end);
+            return NULL;
+        }
 
+        //printf("[ KMALLOC ] mapPage(virt=%#zx, phys=%#zx)\n", heap_end, phys);
         mapPage((void*)heap_end, phys,
-                PG_PRESENT | PG_WRITABLE | PG_GLOBAL | PG_NX);
+            PG_PRESENT | PG_WRITABLE | PG_GLOBAL | PG_NX);
+        extern void* getPhysicalAddress(void* virtual_address);
+        void* phys_check = getPhysicalAddress((void*)heap_end);
 
         page_meta_t *pm = (page_meta_t*)heap_end;
         pm->live = 0; pm->flags = 0;
 
         heap_end += PAGE_SIZE;
+        //printf("[ KMALLOC LOOP ] heap_end incremented to %#zx\n", heap_end);
     }
 
     hdr_t *hdr = (hdr_t*)heap_top;

@@ -90,6 +90,8 @@ enum
 
 const uint32_t CPUID_FLAG_MSR = 1 << 5;
 volatile uint32_t *lapic;
+
+uint8_t apic_init_done = 0;
  
 static int cpuHasMSR()
 {
@@ -193,6 +195,8 @@ void enableAPIC(void)
     svr &= ~0xFF;
     svr |= 0x100 | 0xFF;       // APIC Software Enable + vector 0xFF
     lapic_write(0xF0, svr);
+    
+    apic_init_done = 1;
 }
 
 void unmask_all_lapic_interrupts(void)

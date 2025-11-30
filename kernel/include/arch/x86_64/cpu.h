@@ -76,6 +76,12 @@ static inline void cpuid(int code, uint32_t* a, uint32_t* d)
     asm volatile ( "cpuid" : "=a"(*a), "=d"(*d) : "0"(code) : "ebx", "ecx" );
 }
 
+static inline long current_cpu_id(void) {
+	long id;
+	asm volatile ("mov %%gs:24, %%rax" : "=a"(id) : : "memory");
+	return id;
+}
+
 static int has_tsc(void) {
     uint32_t eax = 1, edx = 0;
     cpuid(1, &eax, &edx);

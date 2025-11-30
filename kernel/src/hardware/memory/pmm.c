@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <limine.h>
 
@@ -17,6 +18,8 @@ void pmm_init() {
     size_t stolen = 1;
     free_list_head = NULL;
 
+    size_t total_pages = 0;
+    size_t total_bytes = 0;
     for (size_t e = 0; e < mm->entry_count; ++e) {
         struct limine_memmap_entry *ent = mm->entries[e];
         if (ent->type != LIMINE_MEMMAP_USABLE)
@@ -34,15 +37,22 @@ void pmm_init() {
             struct FreeBlock *blk = (void *)(hhdm + p);
             blk->next = free_list_head;
             free_list_head = blk;
+            total_pages++;
+            total_bytes += PAGE_SIZE;
         }
     }
+    printf("[ PMM ] Total pages added: %zu (%zu bytes, %zu MiB)\n", total_pages, total_bytes, total_bytes / (1024 * 1024));
 }
 
 uintptr_t alloc_page() {
-    if (!free_list_head) return 0;
+    if (!free_list_head) {
+        printf("[PMM] alloc_page: Out of physical memory!\n");
+        return 0;
+    }
     struct FreeBlock *page = free_list_head;
     free_list_head = page->next;
-    return (uintptr_t)page - hhdm;
+    uintptr_t ret = (uintptr_t)page - hhdm;
+    return ret;
 }
 
 uintptr_t alloc_pages(size_t num_pages) {

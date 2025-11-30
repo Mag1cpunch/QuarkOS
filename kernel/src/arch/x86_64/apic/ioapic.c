@@ -9,8 +9,6 @@
 
 #include <hardware/devices/serial.h>
 
-#include <drivers/input/ps2.h>
-
 extern char* set1_scancodes[];
 extern char* shift_set1_scancodes[];
 

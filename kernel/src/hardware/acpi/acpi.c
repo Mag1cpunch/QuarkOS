@@ -8,8 +8,11 @@
 
 #include <arch/x86_64/cpu.h>
 
+#include <lai/core.h>
+#include <lai/helpers/pm.h>
+#include <lai/helpers/sci.h>
+
 #include <hardware/acpi/acpi.h>
-#include <hardware/acpi/uacpi/uacpi.h>
 #include <hardware/acpi/descriptor_tables/fadt.h>
 #include <hardware/requests.h>
 #include <hardware/memory/paging.h>
@@ -19,29 +22,23 @@
 #include <system/multitasking/tasksched.h>
 
 static struct limine_rsdp_response *rsdp_response;
-static struct FADT *fadt;
-
-static inline void ensure_mapped_phys_range(uintptr_t phys, size_t size)
-{
-    uintptr_t start = phys & ~(PAGE_SIZE - 1);
-    uintptr_t end   = (phys + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    for (uintptr_t p = start; p < end; p += PAGE_SIZE) {
-        void *v = (void *)virt_addr(p);
-        if (!is_mapped(v)) {
-            mapPage(v, (void *)p, PG_WRITABLE | PG_NX);
-        }
-    }
-}
+struct FADT *fadt;
 
 static ACPISDTHeader *findFACP_in_XSDT(XSDT *xsdt)
 {
     int entries = (xsdt->h.Length - sizeof(xsdt->h)) / 8;
     for (int i = 0; i < entries; i++) {
-        uintptr_t phys = (uintptr_t)xsdt->PointerToOtherSDT[i];
+        uint64_t raw;
+        memcpy(&raw, (uint8_t*)xsdt->PointerToOtherSDT + i * 8, 8);
+        uintptr_t phys = (uintptr_t)raw;
         ensure_mapped_phys_range(phys, sizeof(ACPISDTHeader));
         ACPISDTHeader *h = (ACPISDTHeader *)(uintptr_t)virt_addr(phys);
-        if (!strncmp(h->Signature, "FACP", 4))
+        if (!strncmp(h->Signature, "FACP", 4)) {
+            
+            uint8_t sum = 0;
+            for (unsigned i = 0; i < h->Length; ++i) sum += ((uint8_t*)h)[i];
             return h;
+        }
     }
     return NULL;
 }
@@ -50,11 +47,21 @@ static ACPISDTHeader *findFACP_in_RSDT(RSDT *rsdt)
 {
     int entries = (rsdt->h.Length - sizeof(rsdt->h)) / 4;
     for (int i = 0; i < entries; i++) {
-        uintptr_t phys = (uintptr_t)rsdt->PointerToOtherSDT[i];
-        ensure_mapped_phys_range(phys, sizeof(ACPISDTHeader));
-        ACPISDTHeader *h = (ACPISDTHeader *)(uintptr_t)virt_addr(phys);
-        if (!strncmp(h->Signature, "FACP", 4))
+        uint32_t raw;
+        memcpy(&raw, (uint8_t*)rsdt->PointerToOtherSDT + i * 4, 4);
+        uintptr_t phys = (uintptr_t)raw;
+        ensure_mapped_phys_range(phys, 64);
+        uint8_t *dump = (uint8_t *)virt_addr(phys);
+        for (int j = 0; j < 64; j++) {
+            printf("%02x ", dump[j]);
+            if ((j+1) % 16 == 0) printf("\n");
+        }
+        ACPISDTHeader *h = (ACPISDTHeader *)dump;
+        if (!strncmp(h->Signature, "FACP", 4)) {
+            uint8_t sum = 0;
+            for (unsigned i = 0; i < h->Length; ++i) sum += ((uint8_t*)h)[i];
             return h;
+        }
     }
     return NULL;
 }
@@ -64,21 +71,44 @@ static inline void processFADT(struct FADT *fadt_table)
     uintptr_t fadt_phys = phys_addr(fadt_table);
     size_t map_size = fadt_table->h.Length > sizeof(struct FADT) ? fadt_table->h.Length : sizeof(struct FADT);
     ensure_mapped_phys_range(fadt_phys, map_size);
-    
+
+    if (fadt_table->h.Revision >= 2) {
+        fadt_table->x_dsdt = 0;
+    }
+    if (fadt_table->dsdt) {
+        ensure_mapped_phys_range((uintptr_t)fadt_table->dsdt, sizeof(ACPISDTHeader));
+        ACPISDTHeader *dsdt_h = (ACPISDTHeader *)virt_addr((uintptr_t)fadt_table->dsdt);
+        ensure_mapped_phys_range((uintptr_t)fadt_table->dsdt, dsdt_h->Length);
+    }
+    // ACPI 2.0+ X_Dsdt field (64-bit)
+    if (fadt_table->h.Revision >= 2 && fadt_table->x_dsdt) {
+        ensure_mapped_phys_range((uintptr_t)fadt_table->x_dsdt, sizeof(ACPISDTHeader));
+        ACPISDTHeader *xdsdt_h = (ACPISDTHeader *)virt_addr((uintptr_t)fadt_table->x_dsdt);
+        ensure_mapped_phys_range((uintptr_t)fadt_table->x_dsdt, xdsdt_h->Length);
+    }
+
     fadt = fadt_table;
 
-    if (fadt->AcpiDisable == 0 && fadt->AcpiEnable == 0 && fadt->SMI_CommandPort == 0) {
+    if (fadt->acpi_disable == 0 && fadt->acpi_enable == 0 && fadt->smi_command_port == 0) {
         printf("[ ACPI ] ACPI already enabled. Skipping...\n");
         return;
     }
 
-    IoWrite8(fadt->SMI_CommandPort, fadt->AcpiEnable);
+    IoWrite8(fadt->smi_command_port, fadt->acpi_enable);
 
-    while (IoRead16(fadt->PM1aControlBlock) & 1 == 0) ;
+    while (IoRead16(fadt->pm1a_control_block) & 1 == 0) ;
 }
 
 static void processRSDT(RSDT *rsdt)
 {
+    // HACK: Force-align all SDT pointers in the RSDT to 4 bytes
+    int entries = (rsdt->h.Length - sizeof(rsdt->h)) / 4;
+    for (int i = 0; i < entries; i++) {
+        uint32_t *ptr = (uint32_t *)((uint8_t*)rsdt->PointerToOtherSDT + i * 4);
+        if ((*ptr & 0x3) != 0) {
+            *ptr &= ~0x3;
+        }
+    }
     ACPISDTHeader *h = findFACP_in_RSDT(rsdt);
     if (h) {
         struct FADT *fadt_table = (struct FADT *)h;
@@ -96,28 +126,125 @@ static void processXSDT(XSDT *xsdt)
 }
 
 void acpi_init() {
+
+    rsdp_response = get_rsdp();
+    if (!rsdp_response || !rsdp_response->address) {
+        printf("[ ACPI ] No RSDP found!\n");
+        return;
+    }
+
+    if (!rsdp_response) { printf("[ ACPI DEBUG ] rsdp_response is NULL!\n"); hcf(); }
+    uintptr_t acpi_min = (uintptr_t)-1;
+    uintptr_t acpi_max = 0;
+    
+    ensure_mapped_phys_range((uintptr_t)rsdp_response->address, sizeof(XSDP_t));
+    XSDP_t *xsdp_map = (XSDP_t *)virt_addr((uintptr_t)rsdp_response->address);
+    if (!xsdp_map) { printf("[ ACPI DEBUG ] xsdp_map is NULL!\n"); hcf(); }
+    int use_xsdt = (xsdp_map->revision >= 2 && xsdp_map->xsdt_address != 0 && xsdp_map->xsdt_address <= 0xFFFFFFFFFFFF);
+    if (use_xsdt) {
+        XSDT *xsdt = (XSDT *)virt_addr((uintptr_t)xsdp_map->xsdt_address);
+        if (!xsdt) { printf("[ ACPI DEBUG ] xsdt is NULL!\n"); hcf(); }
+        int entries = (xsdt->h.Length - sizeof(xsdt->h)) / 8;
+        for (int i = 0; i < entries; i++) {
+            uint64_t entry_phys;
+            memcpy(&entry_phys, (uint8_t*)xsdt->PointerToOtherSDT + i * 8, 8);
+            ensure_mapped_phys_range((uintptr_t)entry_phys, sizeof(ACPISDTHeader));
+            ACPISDTHeader *h = (ACPISDTHeader *)virt_addr((uintptr_t)entry_phys);
+            if (!h) { printf("[ ACPI DEBUG ] XSDT entry %d header is NULL!\n", i); hcf(); }
+            uintptr_t start = (uintptr_t)entry_phys;
+            uintptr_t end = start + h->Length;
+            if (start < acpi_min) acpi_min = start;
+            if (end > acpi_max) acpi_max = end;
+        }
+        uintptr_t xsdt_start = (uintptr_t)xsdp_map->xsdt_address;
+        uintptr_t xsdt_end = xsdt_start + xsdt->h.Length;
+        if (xsdt_start < acpi_min) acpi_min = xsdt_start;
+        if (xsdt_end > acpi_max) acpi_max = xsdt_end;
+    } else {
+        RSDT *rsdt = (RSDT *)virt_addr((uintptr_t)xsdp_map->rsdt_address);
+        if (!rsdt) { printf("[ ACPI DEBUG ] rsdt is NULL!\n"); hcf(); }
+        int entries = (rsdt->h.Length - sizeof(rsdt->h)) / 4;
+        for (int i = 0; i < entries; i++) {
+            uint32_t entry_phys;
+            memcpy(&entry_phys, (uint8_t*)rsdt->PointerToOtherSDT + i * 4, 4);
+            ACPISDTHeader *h = (ACPISDTHeader *)virt_addr((uintptr_t)entry_phys);
+            if (!h) { printf("[ ACPI DEBUG ] RSDT entry %d header is NULL!\n", i); hcf(); }
+            uintptr_t start = (uintptr_t)entry_phys;
+            uintptr_t end = start + h->Length;
+            if (start < acpi_min) acpi_min = start;
+            if (end > acpi_max) acpi_max = end;
+        }
+        uintptr_t rsdt_start = (uintptr_t)xsdp_map->rsdt_address;
+        uintptr_t rsdt_end = rsdt_start + rsdt->h.Length;
+        if (rsdt_start < acpi_min) acpi_min = rsdt_start;
+        if (rsdt_end > acpi_max) acpi_max = rsdt_end;
+    }
+    uintptr_t rsdp_start = (uintptr_t)rsdp_response->address;
+    uintptr_t rsdp_end = rsdp_start + sizeof(XSDP_t);
+    if (rsdp_start < acpi_min) acpi_min = rsdp_start;
+    if (rsdp_end > acpi_max) acpi_max = rsdp_end;
+    
+    acpi_min &= ~(PAGE_SIZE - 1);
+    acpi_max = (acpi_max + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    for (uintptr_t p = acpi_min; p < acpi_max; p += PAGE_SIZE) {
+        void *v = (void *)virt_addr(p);
+        mapPage(v, (void *)p, PG_WRITABLE | PG_NX);
+    }
+
     rsdp_response = get_rsdp();
     if (rsdp_response == NULL) {
         printf("[ ACPI ] RSDP not found.\n");
         hcf();
     }
 
+    if (rsdp_response->address == 0 || rsdp_response->address > 0xFFFFFFFFFFFF) {
+        printf("[ ACPI ] Invalid RSDP address!\n");
+        hcf();
+    }
+
     ensure_mapped_phys_range((uintptr_t)rsdp_response->address, sizeof(XSDP_t));
-    RSDP_t *rsdp = (RSDP_t *)virt_addr((uintptr_t)rsdp_response->address);
-    if (rsdp->revision >= 2) {
-        XSDP_t *xsdp = (XSDP_t *)virt_addr((uintptr_t)rsdp_response->address);
+    XSDP_t *xsdp = (XSDP_t *)virt_addr((uintptr_t)rsdp_response->address);
+
+    if (xsdp->revision >= 2 && xsdp->xsdt_address != 0 && xsdp->xsdt_address <= 0xFFFFFFFFFFFF) {
         ensure_mapped_phys_range((uintptr_t)xsdp->xsdt_address, sizeof(ACPISDTHeader));
         ACPISDTHeader *xh = (ACPISDTHeader *)virt_addr((uintptr_t)xsdp->xsdt_address);
+        if (xh->Length < sizeof(ACPISDTHeader) || xh->Length > 0x10000) {
+            printf("[ ACPI ] XSDT header length invalid!\n");
+            hcf();
+        }
         ensure_mapped_phys_range((uintptr_t)xsdp->xsdt_address, xh->Length);
         processXSDT((XSDT *)virt_addr((uintptr_t)xsdp->xsdt_address));
     } else {
-        ensure_mapped_phys_range((uintptr_t)rsdp->rsdt_address, sizeof(ACPISDTHeader));
-        ACPISDTHeader *rh = (ACPISDTHeader *)virt_addr((uintptr_t)rsdp->rsdt_address);
-        ensure_mapped_phys_range((uintptr_t)rsdp->rsdt_address, rh->Length);
-        processRSDT((RSDT *)virt_addr((uintptr_t)rsdp->rsdt_address));
+        if (xsdp->rsdt_address == 0 || xsdp->rsdt_address > 0xFFFFFFFF) {
+            printf("[ ACPI ] Invalid RSDT address!\n");
+            hcf();
+        }
+        ensure_mapped_phys_range((uintptr_t)xsdp->rsdt_address, sizeof(ACPISDTHeader));
+        ACPISDTHeader *rh = (ACPISDTHeader *)virt_addr((uintptr_t)xsdp->rsdt_address);
+        if (rh->Length < sizeof(ACPISDTHeader) || rh->Length > 0x10000) {
+            printf("[ ACPI ] RSDT header length invalid!\n");
+            hcf();
+        }
+        ensure_mapped_phys_range((uintptr_t)xsdp->rsdt_address, rh->Length);
+        processRSDT((RSDT *)virt_addr((uintptr_t)xsdp->rsdt_address));
     }
 
-    uacpi_initialize(0);
+    if (fadt) {
+        uintptr_t fadt_phys = phys_addr(fadt);
+        if (fadt->h.Revision >= 2 && (fadt->x_dsdt == 0x200100000000ULL || fadt->x_dsdt > 0xFFFFFFFFFFFFULL || fadt->x_dsdt < 0x1000)) {
+            fadt->x_dsdt = 0;
+        }
+    }
+    lai_set_acpi_revision(rsdp_response->revision);
+    lai_create_namespace();
+
+    extern uint8_t apic_init_done;
+    if (apic_init_done) {
+        lai_enable_acpi(1);
+    }
+    else {
+        lai_enable_acpi(0);
+    }
 }
 
 static void keyboard_controller_reboot(void) {
@@ -145,45 +272,8 @@ static void triple_fault_reboot(void) {
 }
 
 void acpi_reboot() {
-    if (rsdp_response->revision < 2) {
-        IoWrite8(0xCF9, 0x06);
-        for (volatile int i = 0; i < 100000000; i++);
-    }
-    
-    if (fadt != NULL) {
-        size_t reset_offset = offsetof(struct FADT, ResetReg);
-        if (fadt->h.Length > reset_offset + sizeof(GenericAddressStructure) && 
-            fadt->ResetReg.Address != 0) {
-            
-            uint8_t addr_space = fadt->ResetReg.AddressSpace;
-            
-            if (addr_space <= 2) {
-                switch (addr_space) {
-                    case 0: // System Memory
-                        if (fadt->ResetReg.Address < 0x100000000ULL) {
-                            ensure_mapped_phys_range((uintptr_t)fadt->ResetReg.Address, 1);
-                            *(volatile uint8_t *)virt_addr((uintptr_t)fadt->ResetReg.Address) = fadt->ResetValue;
-                        }
-                        break;
-                    
-                    case 1: // System I/O
-                        if (fadt->ResetReg.Address < 0x10000) {
-                            IoWrite8((uint16_t)fadt->ResetReg.Address, fadt->ResetValue);
-                        }
-                        break;
-                    
-                    case 2: // PCI Configuration Space
-                        printf("[ ACPI ] PCI config space reset not implemented.\n");
-                        break;
-                }
-                
-                for (volatile int i = 0; i < 10000000; i++);
-            }
-        } else {
-            printf("[ ACPI ] FADT too old (Length=%u), no reset register support.\n", fadt->h.Length);
-        }
-    }
-    
+    lai_acpi_reset();
+
     printf("[ ACPI ] Trying alternative reset methods...\n");
     qemu_reboot();
     triple_fault_reboot();
@@ -194,100 +284,8 @@ void acpi_reboot() {
     }
 }
 
-static uint8_t get_S5_sleep_type() {
-    uacpi_object *s5_pkg = NULL;
-    uacpi_status st = uacpi_eval_simple(NULL, "_S5", &s5_pkg);
-    if (st != UACPI_STATUS_OK || !s5_pkg) {
-        if (s5_pkg) uacpi_object_unref(s5_pkg);
-        return 5;
-    }
-    if (uacpi_object_get_type(s5_pkg) != UACPI_OBJECT_PACKAGE) {
-        uacpi_object_unref(s5_pkg);
-        return 5;
-    }
-    uacpi_object_array arr;
-    if (uacpi_object_get_package(s5_pkg, &arr) != UACPI_STATUS_OK || arr.count < 2) {
-        uacpi_object_unref(s5_pkg);
-        return 5;
-    }
-    uacpi_object *slp_typa = arr.objects[0];
-    uint8_t val = 5;
-    if (slp_typa && uacpi_object_get_type(slp_typa) == UACPI_OBJECT_INTEGER) {
-        uacpi_u64 val64 = 5;
-        if (uacpi_object_get_integer(slp_typa, &val64) == UACPI_STATUS_OK)
-            val = (uint8_t)val64;
-    }
-    uacpi_object_unref(s5_pkg);
-    return val;
-}
-
 void acpi_shutdown() {
-    if (!fadt) {
-        printf("[ ACPI ] FADT not initialized, cannot shutdown.\n");
-        return;
-    }
-
-    uint16_t SLP_TYP = get_S5_sleep_type();
-    uint16_t SLP_EN = 1 << 13;
-    uint16_t pm1a_cnt = fadt->PM1aControlBlock;
-    uint16_t pm1b_cnt = fadt->PM1bControlBlock;
-
-    uacpi_object *arg5 = uacpi_object_create_integer(5);
-    uacpi_object *ret = NULL;
-    uacpi_status st = UACPI_STATUS_INTERNAL_ERROR;
-    if (arg5) {
-        uacpi_object_array args5 = { .count = 1, .objects = &arg5 };
-        st = uacpi_eval(NULL, "_PTS", &args5, &ret);
-        if (st == UACPI_STATUS_OK) {
-            if (ret) uacpi_object_unref(ret);
-        } else {
-            printf("[ ACPI ] _PTS(5) not present or failed.\n");
-        }
-        uacpi_object_unref(arg5);
-    } else {
-        printf("[ ACPI ] Failed to allocate _PTS argument.\n");
-    }
-
-    st = uacpi_eval_simple(NULL, "_GTS", &ret);
-    if (st == UACPI_STATUS_OK) {
-        if (ret) uacpi_object_unref(ret);
-    } else {
-        printf("[ ACPI ] _GTS not present or failed.\n");
-    }
-
-    uacpi_object *arg0 = uacpi_object_create_integer(0);
-    if (arg0) {
-        uacpi_object_array args0 = { .count = 1, .objects = &arg0 };
-        st = uacpi_eval(NULL, "_SST", &args0, &ret);
-        if (st == UACPI_STATUS_OK) {
-            if (ret) uacpi_object_unref(ret);
-        } else {
-            printf("[ ACPI ] _SST(0) not present or failed.\n");
-        }
-        uacpi_object_unref(arg0);
-    } else {
-        printf("[ ACPI ] Failed to allocate _SST argument.\n");
-    }
-
-    __asm__ volatile ("cli");
-
-    uint16_t sci_val = IoRead16(pm1a_cnt);
-    sci_val &= ~1;
-    IoWrite16(pm1a_cnt, sci_val);
-
-    uint16_t val = IoRead16(pm1a_cnt);
-    val &= 0xE3FF;
-    val |= (SLP_TYP << 10) | SLP_EN;
-    IoWrite16(pm1a_cnt, val);
-
-    if (pm1b_cnt) {
-        uint16_t val2 = IoRead16(pm1b_cnt);
-        val2 &= 0xE3FF;
-        val2 |= (SLP_TYP << 10) | SLP_EN;
-        IoWrite16(pm1b_cnt, val2);
-    }
-
-    for (volatile int i = 0; i < 100000000; i++);
+    lai_enter_sleep(5);
 
     printf("[ ACPI ] ACPI shutdown did not work, trying QEMU port...\n");
     IoWrite16(0x604, 0x2000);
