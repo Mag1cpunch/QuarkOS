@@ -1,6 +1,9 @@
 #include <string.h>
 
+#include <arch/x86_64/cpu.h>
+
 #include <hardware/requests.h>
+#include <hardware/devices/io.h>
 
 #include <system/term.h>
 #include <system/flanterm.h>
@@ -39,5 +42,8 @@ void term_write(const char *s) {
 }
 
 void kputchar(char c) {
-    flanterm_write(ft_ctx, &c, 1); 
+    flanterm_write(ft_ctx, &c, 1);
+
+    if (is_running_under_qemu(NULL))
+        IoWrite8(0x3F8, c);
 }

@@ -1,2 +1,2 @@
 docker run --rm -it -v %cd%:/src quarkos-buildenv bash -c make
-qemu-system-x86_64 -cdrom output/QuarkOS.iso -m 512M -serial mon:stdio -no-reboot -no-shutdown -device i8042
+qemu-system-x86_64 -cdrom output/QuarkOS.iso -m 512M -serial mon:stdio -device virtio-net,netdev=net0 -netdev user,id=net0 -machine q35 -smp 4 -drive if=pflash,format=raw,readonly=on,file=C:/OVMF/code.fd -drive if=pflash,format=raw,readonly=on,file=C:/OVMF/vars.fd

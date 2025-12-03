@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #include <arch/x86_64/pic.h>
 
 #include <hardware/devices/io.h>

@@ -3,6 +3,13 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
+#define __assert(x) do { \
+    if (!(x)) { \
+        printf("Assertion failed: %s, %s:%d\n", #x, __FILE__, __LINE__); \
+        for(;;); \
+    } \
+} while(0)
+
 #include <stdio.h>
 #include <stdint.h>
 

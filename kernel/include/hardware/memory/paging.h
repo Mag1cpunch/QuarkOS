@@ -54,6 +54,7 @@ void* getPhysicalAddress(void* virtual_address);
 PageTable* initPML4(void); 
 void mapPage(void* virtual_address, void* physical_address, uint64_t flags);
 void mapPage_in_pml4(uint64_t pml4_phys, void *virt, void *phys, uint64_t flags);
+void map_region(void *virt, void *phys, size_t size, uint64_t flags);
 uint64_t readCR3(void);
 uintptr_t page_base(void *p);
 void unmapPage(void *virtual_address);
@@ -68,5 +69,35 @@ static inline void* virt_addr(uintptr_t phys) {
 
 static inline uintptr_t phys_addr(void* virt) {
     return (uintptr_t)virt - hhdm;
+}
+
+static inline bool is_mapped(void *virtual_address) {
+    uintptr_t virt = (uintptr_t)virtual_address;
+
+    uint64_t pml4_i  = (virt >> 39) & 0x1FF;
+    uint64_t pdpt_i  = (virt >> 30) & 0x1FF;
+    uint64_t pd_i    = (virt >> 21) & 0x1FF;
+    uint64_t pt_i    = (virt >> 12) & 0x1FF;
+
+    PageTable *pml4_tbl = pml4;
+    if (!pml4_tbl->entries[pml4_i].present)
+        return false;
+
+    PageTable *pdpt = (PageTable*)virt_addr(
+        (uintptr_t)pml4_tbl->entries[pml4_i].physical_address << 12);
+    if (!pdpt->entries[pdpt_i].present)
+        return false;
+
+    PageTable *pd = (PageTable*)virt_addr(
+        (uintptr_t)pdpt->entries[pdpt_i].physical_address << 12);
+    if (!pd->entries[pd_i].present)
+        return false;
+
+    PageTable *pt = (PageTable*)virt_addr(
+        (uintptr_t)pd->entries[pd_i].physical_address << 12);
+    if (!pt->entries[pt_i].present)
+        return false;
+
+    return true;
 }
 #endif

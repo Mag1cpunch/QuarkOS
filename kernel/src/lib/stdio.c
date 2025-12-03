@@ -63,14 +63,33 @@ int printf(const char *fmt, ...)
     for (; *fmt; ++fmt) {
         if (*fmt != '%') { kputchar(*fmt); ++written; continue; }
 
-        int alt = 0;
+        // Flags
+        int alt = 0, zero = 0, left = 0, plus = 0, space = 0;
+        int width = 0, precision = -1;
         for (++fmt; ; ++fmt) {
             if (*fmt == '#') { alt = 1; continue; }
-            if (*fmt == '0' || *fmt == '-' ||
-                *fmt == '+' || *fmt == ' ')  continue;
+            if (*fmt == '0') { zero = 1; continue; }
+            if (*fmt == '-') { left = 1; continue; }
+            if (*fmt == '+') { plus = 1; continue; }
+            if (*fmt == ' ') { space = 1; continue; }
             break;
         }
 
+        // Width
+        if (*fmt >= '0' && *fmt <= '9') {
+            width = 0;
+            while (*fmt >= '0' && *fmt <= '9')
+                width = width * 10 + (*fmt++ - '0');
+        }
+        // Precision
+        if (*fmt == '.') {
+            ++fmt;
+            precision = 0;
+            while (*fmt >= '0' && *fmt <= '9')
+                precision = precision * 10 + (*fmt++ - '0');
+        }
+
+        // Length modifier
         int mod = NONE;
         if (*fmt == 'h' && fmt[1]=='h') { mod = HH; fmt += 2; }
         else if (*fmt == 'h')           { mod = H;  ++fmt;  }
@@ -80,41 +99,73 @@ int printf(const char *fmt, ...)
         else if (*fmt == 't')           { mod = T;  ++fmt;  }
         else if (*fmt == 'j')           { mod = J;  ++fmt;  }
 
+        char pad = zero && !left ? '0' : ' ';
+
         switch (*fmt) {
-        case 'c':
-            kputchar((char)va_arg(ap,int));
-            ++written;
-            break;
+        case 'c': {
+            char c = (char)va_arg(ap,int);
+            int padlen = width > 1 ? width - 1 : 0;
+            if (!left) while (padlen--) { kputchar(pad); ++written; }
+            kputchar(c); ++written;
+            if (left) while (padlen--) { kputchar(' '); ++written; }
+        } break;
 
         case 's': {
             const char *s = va_arg(ap,const char*);
-            while (*s) { kputchar(*s++); ++written; }
+            int slen = 0; const char *t = s;
+            while (*t && (precision < 0 || slen < precision)) { ++slen; ++t; }
+            int padlen = width > slen ? width - slen : 0;
+            if (!left) while (padlen--) { kputchar(pad); ++written; }
+            for (int i = 0; i < slen; ++i) { kputchar(*s++); ++written; }
+            if (left) while (padlen--) { kputchar(' '); ++written; }
         } break;
 
-        case 'd': case 'i':
-            print_int(fetch_s(mod, ap), kputchar);
-            break;
+        case 'd': case 'i': {
+            long long v = fetch_s(mod, ap);
+            char buf[32]; int len = 0;
+            int neg = v < 0;
+            unsigned long long uv = neg ? -v : v;
+            if (!uv) buf[len++] = '0';
+            while (uv) { buf[len++] = '0' + (uv % 10); uv /= 10; }
+            if (neg) buf[len++] = '-';
+            else if (plus) buf[len++] = '+';
+            else if (space) buf[len++] = ' ';
+            int padlen = width > len ? width - len : 0;
+            if (!left) while (padlen-- > 0) { kputchar(pad); ++written; }
+            while (len) { kputchar(buf[--len]); ++written; }
+            if (left) while (padlen-- > 0) { kputchar(' '); ++written; }
+        } break;
 
-        case 'u':
-            print_uint(fetch_u(mod, ap), 10, 0, kputchar);
-            break;
-
-        case 'o': {
+        case 'u': case 'o': case 'x': case 'X': {
             unsigned long long v = fetch_u(mod, ap);
-            if (alt && v) kputchar('0');
-            print_uint(v, 8, 0, kputchar);
+            int base = (*fmt == 'u') ? 10 : (*fmt == 'o') ? 8 : 16;
+            char buf[32]; int len = 0;
+            const char *dig = (*fmt == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+            if (!v) buf[len++] = '0';
+            while (v) { buf[len++] = dig[v % base]; v /= base; }
+            if (alt && *fmt == 'o' && buf[len-1] != '0') buf[len++] = '0';
+            if (alt && *fmt == 'x') { buf[len++] = 'x'; buf[len++] = '0'; }
+            if (alt && *fmt == 'X') { buf[len++] = 'X'; buf[len++] = '0'; }
+            int padlen = width > len ? width - len : 0;
+            if (!left) while (padlen-- > 0) { kputchar(pad); ++written; }
+            while (len) { kputchar(buf[--len]); ++written; }
+            if (left) while (padlen-- > 0) { kputchar(' '); ++written; }
         } break;
 
-        case 'x': case 'X': {
-            unsigned long long v = fetch_u(mod, ap);
-            if (alt) { kputchar('0'); kputchar((*fmt=='x')?'x':'X'); }
-            print_uint(v, 16, *fmt=='X', kputchar);
+        case 'p': {
+            uintptr_t v = (uintptr_t)va_arg(ap, void*);
+            char buf[2 + sizeof(uintptr_t) * 2];
+            int len = 0;
+            buf[len++] = '0'; buf[len++] = 'x';
+            for (int i = (sizeof(uintptr_t) * 2) - 1; i >= 0; --i)
+                buf[len++] = "0123456789abcdef"[(v >> (i * 4)) & 0xf];
+            for (int i = 0; i < len; ++i) { kputchar(buf[i]); ++written; }
         } break;
 
-        case 'p':
-            kputchar('0'); kputchar('x');
-            print_uint((uintptr_t)va_arg(ap, void*), 16, 0, kputchar);
-            break;
+        case 'n': {
+            int *ptr = va_arg(ap, int*);
+            *ptr = written;
+        } break;
 
         case '%': kputchar('%'); ++written; break;
 

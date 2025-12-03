@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <colors.h>
 #include <limine.h>
 #include <kernel.h>
 
@@ -18,6 +19,10 @@
 #include <hardware/devices/io.h>
 #include <hardware/memory/gdt.h>
 #include <hardware/memory/tss.h>
+#include <hardware/acpi/acpi.h>
+#include <hardware/devices/pci.h>
+
+#include <drivers/video/dfb.h>
 
 #include <system/term.h>
 #include <system/exec/user.h>
@@ -67,11 +72,19 @@ void kmain(void) {
 
     printf("[ KERNEL ] Initializing APIC...\n");
     apic_init();
-    printf("[ OK ] Done.\n");
+    printf("[ OK ] APIC Done.\n");
+
+    printf("[ KERNEL ] Initializing ACPI...\n");
+    acpi_init();
+    printf("[ OK ] ACPI Done.\n");
 
     printf("[ KERNEL ] Starting APIC timer...\n");
     enableAPICTimer(1000);
     printf("[ OK ] Timer active.\n");
+
+    //printf("[ KERNEL ] Initializing PCI...\n");
+    //pci_init();
+    //printf("[ OK ] Done.\n");
 
     printf("[ KERNEL ] Initializing Syscalls...\n");
     syscall_init();
@@ -111,6 +124,8 @@ void kmain(void) {
     finalize_thread_list();
 
     printf("[ KERNEL ] Setup complete. Enabling scheduler.\n");
+
+    apic_timer_sleep_ms(2000);
 
     extern int scheduler_running;
     scheduler_running = 1;

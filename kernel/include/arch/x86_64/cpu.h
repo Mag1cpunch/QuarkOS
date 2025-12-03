@@ -76,6 +76,12 @@ static inline void cpuid(int code, uint32_t* a, uint32_t* d)
     asm volatile ( "cpuid" : "=a"(*a), "=d"(*d) : "0"(code) : "ebx", "ecx" );
 }
 
+static inline long current_cpu_id(void) {
+	long id;
+	asm volatile ("mov %%gs:24, %%rax" : "=a"(id) : : "memory");
+	return id;
+}
+
 static int has_tsc(void) {
     uint32_t eax = 1, edx = 0;
     cpuid(1, &eax, &edx);
@@ -103,6 +109,31 @@ static void reboot() {
     asm volatile("int $3");
     printf("Failed to reboot! Halting.\n");
     hcf();
+}
+
+static inline bool is_running_under_qemu(char *vendor_out) {
+    uint32_t eax, ebx, ecx, edx;
+    __asm__ volatile (
+        "cpuid"
+        : "=a"(eax), "=c"(ecx)
+        : "a"(1)
+        : "ebx", "edx"
+    );
+    if (!(ecx & (1u << 31)))
+        return false;
+
+    __asm__ volatile (
+        "cpuid"
+        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+        : "a"(0x40000000)
+    );
+    if (vendor_out) {
+        ((uint32_t*)vendor_out)[0] = ebx;
+        ((uint32_t*)vendor_out)[1] = ecx;
+        ((uint32_t*)vendor_out)[2] = edx;
+        vendor_out[12] = 0;
+    }
+    return true;
 }
 
 #endif

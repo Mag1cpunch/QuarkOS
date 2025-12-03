@@ -90,6 +90,8 @@ enum
 
 const uint32_t CPUID_FLAG_MSR = 1 << 5;
 volatile uint32_t *lapic;
+
+uint8_t apic_init_done = 0;
  
 static int cpuHasMSR()
 {
@@ -193,6 +195,8 @@ void enableAPIC(void)
     svr &= ~0xFF;
     svr |= 0x100 | 0xFF;       // APIC Software Enable + vector 0xFF
     lapic_write(0xF0, svr);
+    
+    apic_init_done = 1;
 }
 
 void unmask_all_lapic_interrupts(void)
@@ -224,7 +228,8 @@ void unmask_all_lapic_interrupts(void)
 
 // APIC TIMER
 
-static volatile uint64_t apic_timer_ticks = 0;
+volatile uint64_t apic_timer_ticks = 0;
+TimerEvent* g_timer_list = NULL;
 
 extern Thread* current_thread;
 
@@ -483,6 +488,18 @@ void apic_timer_sleep_ms(uint32_t ms) {
     }
     
     //printf("[APIC_SLEEP] Done after %u iterations\n", iterations);
+}
+
+void apic_timer_sleep_microseconds(uint32_t us) {
+    if (us == 0) return;
+    uint32_t ms = us / 1000;
+    uint32_t rem_us = us % 1000;
+    if (ms > 0) {
+        apic_timer_sleep_ms(ms);
+    }
+    if (rem_us > 0) {
+        tsc_sleep(rem_us);
+    }
 }
 
 void apic_timer_simple_test(void)

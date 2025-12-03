@@ -1,23 +1,23 @@
-global acquireLock
-global releaseLock
-
-section .bss
-    align 4
-    spinlock_var resd 1
+global spinlock_acquire
+global spinlock_release
 
 section .text
 
-acquireLock:
-    lock bts dword [rel spinlock_var], 0
+; void spinlock_acquire(spinlock_t *lock)
+spinlock_acquire:
+    mov rax, rdi            ; rdi = pointer to spinlock_t
+.acquire_retry:
+    lock bts dword [rax], 0
     jc .spin_with_pause
     ret
-
 .spin_with_pause:
     pause
-    test dword [rel spinlock_var], 1
+    test dword [rax], 1
     jnz .spin_with_pause
-    jmp acquireLock
+    jmp .acquire_retry
 
-releaseLock:
-    mov dword [rel spinlock_var], 0
+; void spinlock_release(spinlock_t *lock)
+spinlock_release:
+    mov rax, rdi
+    mov dword [rax], 0
     ret
