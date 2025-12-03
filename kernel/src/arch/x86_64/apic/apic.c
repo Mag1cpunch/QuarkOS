@@ -229,6 +229,7 @@ void unmask_all_lapic_interrupts(void)
 // APIC TIMER
 
 volatile uint64_t apic_timer_ticks = 0;
+TimerEvent* g_timer_list = NULL;
 
 extern Thread* current_thread;
 

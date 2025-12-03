@@ -72,15 +72,15 @@ void kmain(void) {
 
     printf("[ KERNEL ] Initializing APIC...\n");
     apic_init();
-    printf("[ OK ] Done.\n");
+    printf("[ OK ] APIC Done.\n");
+
+    printf("[ KERNEL ] Initializing ACPI...\n");
+    acpi_init();
+    printf("[ OK ] ACPI Done.\n");
 
     printf("[ KERNEL ] Starting APIC timer...\n");
     enableAPICTimer(1000);
     printf("[ OK ] Timer active.\n");
-
-    printf("[ KERNEL ] Initializing ACPI...\n");
-    acpi_init();
-    printf("[ OK ] Done.\n");
 
     //printf("[ KERNEL ] Initializing PCI...\n");
     //pci_init();
@@ -91,25 +91,6 @@ void kmain(void) {
     printf("[ OK ] Done.\n");
 
     printf("[ INFO ] Hello, World from QuarkOS kernel!\n");
-    //apic_timer_sleep_ms(5000);
-    //acpi_reboot();
-    //acpi_shutdown();
-
-    printf("[ KERNEL ] Initializing Framebuffer...\n");
-    struct limine_framebuffer_response* fb = get_framebuffer();
-    if (!fb) {
-        printf("[ KERNEL ERROR ] No framebuffer found!\n");
-        for (;;) { __asm__("cli; hlt"); }
-    }
-    dfb_init(fb->framebuffers[0]->width, fb->framebuffers[0]->height, fb->framebuffers[0]->pitch, (void*)fb->framebuffers[0]->address);
-    printf("[ OK ] Done.\n");
-
-    dfb_fillscreen(COLOR_BLACK);
-    //dfb_swapbuffers();
-
-    //for (;;) {
-    //    asm volatile ("hlt");
-    //}
 
     printf("[ KERNEL ] Initializing Userspace GDT...\n");
     tss_init();
@@ -143,6 +124,8 @@ void kmain(void) {
     finalize_thread_list();
 
     printf("[ KERNEL ] Setup complete. Enabling scheduler.\n");
+
+    apic_timer_sleep_ms(2000);
 
     extern int scheduler_running;
     scheduler_running = 1;

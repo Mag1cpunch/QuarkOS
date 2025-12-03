@@ -128,7 +128,8 @@ void mapPage(void* virtual_address, void* physical_address, uint64_t flags)
         pml4->entries[pml4_index].writable = 1;
     }
 
-    PageTable* page_directory_pointer = (PageTable*) virt_addr((uintptr_t)(pml4->entries[pml4_index].physical_address << 12));
+    uintptr_t pdpt_phys = (uintptr_t)pml4->entries[pml4_index].physical_address << 12;
+    PageTable* page_directory_pointer = (PageTable*) virt_addr(pdpt_phys);
 
     if (!page_directory_pointer->entries[page_directory_pointer_index].present) {
         allocateEntry(page_directory_pointer, page_directory_pointer_index, flags);

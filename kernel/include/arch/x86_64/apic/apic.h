@@ -19,7 +19,7 @@ typedef struct TimerEvent {
     struct TimerEvent* next;
 } TimerEvent;
 
-static TimerEvent* g_timer_list = NULL;
+extern TimerEvent* g_timer_list;
 
 void cpuGetMSR(uint32_t msr, uint32_t *lo, uint32_t *hi);
 void cpuSetMSR(uint32_t msr, uint32_t lo, uint32_t hi);

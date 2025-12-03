@@ -59,14 +59,12 @@ void *kmalloc(size_t size)
             return NULL;
         }
         uintptr_t phys = alloc_page();
-        //printf("[ KMALLOC ] alloc_page() -> phys=%#zx for heap_end=%#zx\n", phys, heap_end);
         if (!phys) {
-            //printf("[ KMALLOC ] alloc_page returned 0 (PMM out of memory) while allocating %zu bytes (heap_top=%#zx, heap_end=%#zx)\n", size, heap_top, heap_end);
+            printf("[ KMALLOC ] alloc_page returned 0 (PMM out of memory)\n");
             return NULL;
         }
 
-        //printf("[ KMALLOC ] mapPage(virt=%#zx, phys=%#zx)\n", heap_end, phys);
-        mapPage((void*)heap_end, phys,
+        mapPage((void*)heap_end, (void*)phys,
             PG_PRESENT | PG_WRITABLE | PG_GLOBAL | PG_NX);
         extern void* getPhysicalAddress(void* virtual_address);
         void* phys_check = getPhysicalAddress((void*)heap_end);
@@ -115,11 +113,17 @@ void kfree(void *ptr)
         blk = prev;
     }
 
+    // NOTE: Disabled page unmapping for now - it causes crashes because
+    // the free_list may still contain pointers to blocks in the unmapped page.
+    // TODO: Properly remove all blocks from the unmapped page from free_list
+    // before calling unmapPage.
+    /*
     if (page_dec_live_check_empty(blk)) {
         uintptr_t base = page_base(blk);
         unmapPage((void*)base);
         return;
     }
+    */
 }
 
 

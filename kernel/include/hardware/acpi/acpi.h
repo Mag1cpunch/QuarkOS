@@ -68,18 +68,25 @@ void acpi_init();
 void acpi_reboot();
 void acpi_shutdown();
 
-#include <hardware/memory/paging.h>
-#include <stdint.h>
-#include <stddef.h>
-
 static inline void ensure_mapped_phys_range(uintptr_t phys, size_t size)
 {
-  uintptr_t start = (phys & ~(PAGE_SIZE - 1)) - 3 * PAGE_SIZE; // map three pages before
-  uintptr_t end   = (phys + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+  // Skip kernel higher-half addresses (already mapped)
+  if (phys >= 0xffffffff80000000ULL) {
+    return;
+  }
+  
+  // Limine's HHDM should map all physical memory, but some regions
+  // (like ACPI reclaimable) may not be properly mapped in UEFI mode.
+  // We need to manually map these pages.
   extern uint64_t hhdm;
-  for (uintptr_t p = start; p < end; p += PAGE_SIZE) {
-    void *v = (void *)virt_addr(p);
-    mapPage(v, (void *)p, PG_WRITABLE | PG_NX);
+  
+  uintptr_t page_start = phys & ~0xFFFULL;
+  uintptr_t page_end = (phys + size + 0xFFF) & ~0xFFFULL;
+  
+  for (uintptr_t p = page_start; p < page_end; p += 0x1000) {
+    uintptr_t virt = hhdm + p;
+    // Map with PG_PRESENT | PG_WRITABLE
+    mapPage((void*)virt, (void*)p, PG_PRESENT | PG_WRITABLE);
   }
 }
 

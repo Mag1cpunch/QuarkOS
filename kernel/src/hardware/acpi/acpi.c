@@ -80,7 +80,6 @@ static inline void processFADT(struct FADT *fadt_table)
         ACPISDTHeader *dsdt_h = (ACPISDTHeader *)virt_addr((uintptr_t)fadt_table->dsdt);
         ensure_mapped_phys_range((uintptr_t)fadt_table->dsdt, dsdt_h->Length);
     }
-    // ACPI 2.0+ X_Dsdt field (64-bit)
     if (fadt_table->h.Revision >= 2 && fadt_table->x_dsdt) {
         ensure_mapped_phys_range((uintptr_t)fadt_table->x_dsdt, sizeof(ACPISDTHeader));
         ACPISDTHeader *xdsdt_h = (ACPISDTHeader *)virt_addr((uintptr_t)fadt_table->x_dsdt);
@@ -101,7 +100,6 @@ static inline void processFADT(struct FADT *fadt_table)
 
 static void processRSDT(RSDT *rsdt)
 {
-    // HACK: Force-align all SDT pointers in the RSDT to 4 bytes
     int entries = (rsdt->h.Length - sizeof(rsdt->h)) / 4;
     for (int i = 0; i < entries; i++) {
         uint32_t *ptr = (uint32_t *)((uint8_t*)rsdt->PointerToOtherSDT + i * 4);
@@ -129,28 +127,32 @@ void acpi_init() {
 
     rsdp_response = get_rsdp();
     if (!rsdp_response || !rsdp_response->address) {
-        printf("[ ACPI ] No RSDP found!\n");
+        printf("[ ACPI ERROR ] No RSDP found!\n");
         return;
     }
 
-    if (!rsdp_response) { printf("[ ACPI DEBUG ] rsdp_response is NULL!\n"); hcf(); }
+    if (!rsdp_response) { printf("[ ACPI ERROR ] rsdp_response is NULL!\n"); hcf(); }
     uintptr_t acpi_min = (uintptr_t)-1;
     uintptr_t acpi_max = 0;
     
     ensure_mapped_phys_range((uintptr_t)rsdp_response->address, sizeof(XSDP_t));
     XSDP_t *xsdp_map = (XSDP_t *)virt_addr((uintptr_t)rsdp_response->address);
-    if (!xsdp_map) { printf("[ ACPI DEBUG ] xsdp_map is NULL!\n"); hcf(); }
+    if (!xsdp_map) { printf("[ ACPI ERROR ] xsdp_map is NULL!\n"); hcf(); }
     int use_xsdt = (xsdp_map->revision >= 2 && xsdp_map->xsdt_address != 0 && xsdp_map->xsdt_address <= 0xFFFFFFFFFFFF);
     if (use_xsdt) {
+        ensure_mapped_phys_range((uintptr_t)xsdp_map->xsdt_address, sizeof(ACPISDTHeader));
         XSDT *xsdt = (XSDT *)virt_addr((uintptr_t)xsdp_map->xsdt_address);
-        if (!xsdt) { printf("[ ACPI DEBUG ] xsdt is NULL!\n"); hcf(); }
+        if (!xsdt) { printf("[ ACPI ERROR ] xsdt is NULL!\n"); hcf(); }
+
+        ensure_mapped_phys_range((uintptr_t)xsdp_map->xsdt_address, xsdt->h.Length);
         int entries = (xsdt->h.Length - sizeof(xsdt->h)) / 8;
         for (int i = 0; i < entries; i++) {
             uint64_t entry_phys;
             memcpy(&entry_phys, (uint8_t*)xsdt->PointerToOtherSDT + i * 8, 8);
             ensure_mapped_phys_range((uintptr_t)entry_phys, sizeof(ACPISDTHeader));
             ACPISDTHeader *h = (ACPISDTHeader *)virt_addr((uintptr_t)entry_phys);
-            if (!h) { printf("[ ACPI DEBUG ] XSDT entry %d header is NULL!\n", i); hcf(); }
+            if (!h) { printf("[ ACPI ERROR ] XSDT entry %d header is NULL!\n", i); hcf(); }
+            ensure_mapped_phys_range((uintptr_t)entry_phys, h->Length);
             uintptr_t start = (uintptr_t)entry_phys;
             uintptr_t end = start + h->Length;
             if (start < acpi_min) acpi_min = start;
@@ -161,14 +163,20 @@ void acpi_init() {
         if (xsdt_start < acpi_min) acpi_min = xsdt_start;
         if (xsdt_end > acpi_max) acpi_max = xsdt_end;
     } else {
+        ensure_mapped_phys_range((uintptr_t)xsdp_map->rsdt_address, sizeof(ACPISDTHeader));
         RSDT *rsdt = (RSDT *)virt_addr((uintptr_t)xsdp_map->rsdt_address);
-        if (!rsdt) { printf("[ ACPI DEBUG ] rsdt is NULL!\n"); hcf(); }
+        if (!rsdt) { printf("[ ACPI ERROR ] rsdt is NULL!\n"); hcf(); }
+        
+        ensure_mapped_phys_range((uintptr_t)xsdp_map->rsdt_address, rsdt->h.Length);
         int entries = (rsdt->h.Length - sizeof(rsdt->h)) / 4;
         for (int i = 0; i < entries; i++) {
             uint32_t entry_phys;
             memcpy(&entry_phys, (uint8_t*)rsdt->PointerToOtherSDT + i * 4, 4);
+            ensure_mapped_phys_range((uintptr_t)entry_phys, sizeof(ACPISDTHeader));
             ACPISDTHeader *h = (ACPISDTHeader *)virt_addr((uintptr_t)entry_phys);
-            if (!h) { printf("[ ACPI DEBUG ] RSDT entry %d header is NULL!\n", i); hcf(); }
+            if (!h) { printf("[ ACPI ERROR ] RSDT entry %d header is NULL!\n", i); hcf(); }
+            
+            ensure_mapped_phys_range((uintptr_t)entry_phys, h->Length);
             uintptr_t start = (uintptr_t)entry_phys;
             uintptr_t end = start + h->Length;
             if (start < acpi_min) acpi_min = start;
@@ -193,12 +201,12 @@ void acpi_init() {
 
     rsdp_response = get_rsdp();
     if (rsdp_response == NULL) {
-        printf("[ ACPI ] RSDP not found.\n");
+        printf("[ ACPI ERROR ] RSDP not found.\n");
         hcf();
     }
 
     if (rsdp_response->address == 0 || rsdp_response->address > 0xFFFFFFFFFFFF) {
-        printf("[ ACPI ] Invalid RSDP address!\n");
+        printf("[ ACPI ERROR ] Invalid RSDP address!\n");
         hcf();
     }
 
@@ -209,20 +217,20 @@ void acpi_init() {
         ensure_mapped_phys_range((uintptr_t)xsdp->xsdt_address, sizeof(ACPISDTHeader));
         ACPISDTHeader *xh = (ACPISDTHeader *)virt_addr((uintptr_t)xsdp->xsdt_address);
         if (xh->Length < sizeof(ACPISDTHeader) || xh->Length > 0x10000) {
-            printf("[ ACPI ] XSDT header length invalid!\n");
+            printf("[ ACPI ERROR ] XSDT header length invalid!\n");
             hcf();
         }
         ensure_mapped_phys_range((uintptr_t)xsdp->xsdt_address, xh->Length);
         processXSDT((XSDT *)virt_addr((uintptr_t)xsdp->xsdt_address));
     } else {
         if (xsdp->rsdt_address == 0 || xsdp->rsdt_address > 0xFFFFFFFF) {
-            printf("[ ACPI ] Invalid RSDT address!\n");
+            printf("[ ACPI ERROR ] Invalid RSDT address!\n");
             hcf();
         }
         ensure_mapped_phys_range((uintptr_t)xsdp->rsdt_address, sizeof(ACPISDTHeader));
         ACPISDTHeader *rh = (ACPISDTHeader *)virt_addr((uintptr_t)xsdp->rsdt_address);
         if (rh->Length < sizeof(ACPISDTHeader) || rh->Length > 0x10000) {
-            printf("[ ACPI ] RSDT header length invalid!\n");
+            printf("[ ACPI ERROR ] RSDT header length invalid!\n");
             hcf();
         }
         ensure_mapped_phys_range((uintptr_t)xsdp->rsdt_address, rh->Length);
@@ -274,26 +282,26 @@ static void triple_fault_reboot(void) {
 void acpi_reboot() {
     lai_acpi_reset();
 
-    printf("[ ACPI ] Trying alternative reset methods...\n");
-    qemu_reboot();
-    triple_fault_reboot();
-    
-    printf("[ ACPI ] All reboot methods failed. Hanging...\n");
-    for (;;) {
-        __asm__ volatile("pause");
-    }
+    //printf("[ ACPI ] Trying alternative reset methods...\n");
+    //qemu_reboot();
+    //triple_fault_reboot();
+    //
+    //printf("[ ACPI ] All reboot methods failed. Hanging...\n");
+    //for (;;) {
+    //    __asm__ volatile("pause");
+    //}
 }
 
 void acpi_shutdown() {
     lai_enter_sleep(5);
 
-    printf("[ ACPI ] ACPI shutdown did not work, trying QEMU port...\n");
-    IoWrite16(0x604, 0x2000);
-    IoWrite8(0xB004, 0x00);
-    for (volatile int i = 0; i < 100000000; i++);
+    //printf("[ ACPI ] ACPI shutdown did not work, trying QEMU port...\n");
+    //IoWrite16(0x604, 0x2000);
+    //IoWrite8(0xB004, 0x00);
+    //for (volatile int i = 0; i < 100000000; i++);
 
-    printf("[ ACPI ] All shutdown methods failed. Halting.\n");
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    //printf("[ ACPI ] All shutdown methods failed. Halting.\n");
+    //for (;;) {
+    //    __asm__ volatile ("hlt");
+    //}
 }
